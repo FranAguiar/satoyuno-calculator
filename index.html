@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reparto de Compra — Hoja estilo planilla</title>
+  <style>
+    :root{
+      --bg:#0b0f14;--panel:#121821;--muted:#92a2b6;--soft:#1a2330;--accent:#5dd4a3;--danger:#ff6b6b;--ring:#2b3a4b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:#e6eef8;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--ring);background:linear-gradient(180deg,var(--panel),#0f141c);}
+    header .title{font-weight:700;letter-spacing:.3px}
+    .controls{display:flex;flex-wrap:wrap;gap:8px}
+    button{background:var(--soft);color:#e6eef8;border:1px solid var(--ring);padding:8px 12px;border-radius:12px;cursor:pointer;font-weight:600}
+    button:hover{filter:brightness(1.08)}
+    .accent{background:var(--accent);color:#082016;border-color:#3dbd89}
+    .danger{background:var(--danger);color:#2d0b0b;border-color:#e25a5a}
+    main{padding:16px}
+    .sheet{overflow:auto;border:1px solid var(--ring);border-radius:16px;background:var(--panel);}
+    table{border-collapse:separate;border-spacing:0;width:100%;min-width:780px}
+    thead th{position:sticky;top:0;background:linear-gradient(180deg,#16202d,#0f1722);z-index:2}
+    th,td{border-bottom:1px solid #1e2a38;padding:10px 12px;text-align:left}
+    tbody tr:nth-child(odd) td{background:#0f1722}
+    tbody tr:hover td{background:#122033}
+    tfoot td{background:#0f1722;font-weight:700;border-top:2px solid #263447}
+    th:first-child, td:first-child{position:sticky;left:0;background:inherit;z-index:1}
+    th:first-child{background:linear-gradient(180deg,#16202d,#0f1722)}
+    input[type="text"], input[type="number"]{width:100%;background:#0b111a;border:1px solid #233146;color:#e6eef8;border-radius:10px;padding:6px 8px}
+    input[type="number"]{text-align:right}
+    .nameHead{display:flex;align-items:center;gap:8px}
+    .delCol, .delRow{background:transparent;border:none;color:#99a8bb;cursor:pointer}
+    .delCol:hover,.delRow:hover{color:#ffd7d7}
+    .cellBox{display:flex;align-items:center;gap:8px}
+    .share{opacity:.8;font-size:.85em}
+    .stickyFoot{position:sticky;bottom:0;}
+    .muted{color:var(--muted)}
+    .hint{font-size:.9em;color:var(--muted);margin-top:8px}
+    .right{text-align:right}
+    .center{text-align:center}
+    .badge{font-size:.78em;background:#0b111a;border:1px solid #213043;border-radius:999px;padding:3px 8px;color:#b8c6d9}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">🐷 Reparto de Compra <span class="badge">checkbox por persona/producto</span></div>
+    <div class="controls">
+      <button class="accent" id="addPerson">+ Añadir persona</button>
+      <button class="accent" id="addProduct">+ Añadir producto</button>
+      <button id="reset">↺ Vaciar todo</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="sheet">
+      <table id="grid">
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+        <tfoot id="tfoot"></tfoot>
+      </table>
+    </div>
+    <p class="hint">Marca las casillas de quienes comparten cada producto. El coste se reparte a partes iguales entre las personas marcadas. Puedes editar nombres y precios directamente.</p>
+  </main>
+
+<script>
+/******************** Estado ********************/
+let people = []; // editable
+let products = [
+];
+// ejemplo: marcar algunos por defecto
+products.forEach(p=>{ people.forEach((nm,i)=>{ if([0,1,2,3,4].includes(i)) p.checked[nm]= true; });});
+
+/******************** Utiles ********************/
+function id(){ return Math.random().toString(36).slice(2,9) }
+const format = n => (Number.isFinite(n)? n.toLocaleString("es-ES", {minimumFractionDigits:2, maximumFractionDigits:2}) : "-");
+
+/******************** Render ********************/
+function render(){
+  renderHead();
+  renderBody();
+  renderFoot();
+}
+
+function renderHead(){
+  const ths = [
+    `<th class="center" style="min-width:190px">Producto</th>`,
+    `<th class="right" style="min-width:120px">Precio (€)</th>`
+  ];
+  people.forEach((nm,idx)=>{
+    ths.push(`<th class="center"><div class="nameHead"><input data-col="${idx}" class="personName" type="text" value="${escapeHtml(nm)}"/> <button class="delCol" title="Quitar persona" data-col-del="${idx}">✕</button></div></th>`)
+  });
+  document.getElementById('thead').innerHTML = `<tr>${ths.join('')}</tr>`;
+}
+
+function renderBody(){
+  const rows = products.map((p,ri)=>{
+    const cells = [
+      `<td><div class="cellBox"><input class="prodName" data-row="${ri}" type="text" value="${escapeHtml(p.name)}"/></div></td>`,
+      `<td class="right"><input class="prodPrice" data-row="${ri}" type="number" min="0" step="0.01" value="${p.price}"></td>`
+    ];
+
+    const activeCount = (prod=> people.reduce((acc,nm)=> acc + (prod.checked[nm]?1:0),0))(p);
+
+    people.forEach((nm,ci)=>{
+      const on = !!p.checked[nm];
+      const share = on && activeCount>0 ? p.price/activeCount : 0;
+      cells.push(`<td class="center"><label style="display:flex;align-items:center;gap:8px;justify-content:center"><input class="chk" type="checkbox" data-row="${ri}" data-person="${ci}" ${on?"checked":""}/> <span class="share">${on?format(share):""}</span></label></td>`)
+    });
+
+    return `<tr>${cells.join('')}<td hidden></td></tr>`;
+  });
+  document.getElementById('tbody').innerHTML = rows.join('');
+}
+
+function renderFoot(){
+  const totals = calcTotals();
+  const tds = [
+    `<td class="right">Total</td>`,
+    `<td class="right">${format(products.reduce((a,p)=>a+Number(p.price||0),0))}</td>`
+  ];
+  people.forEach(nm=>{
+    tds.push(`<td class="right">${format(totals[nm]||0)}</td>`)
+  });
+  document.getElementById('tfoot').innerHTML = `<tr class="stickyFoot">${tds.join('')}</tr>`;
+}
+
+/******************** Logica ********************/
+function calcTotals(){
+  const totals = Object.fromEntries(people.map(nm=>[nm,0]));
+  for(const p of products){
+    const marked = people.filter(nm=>p.checked[nm]);
+    const n = marked.length;
+    if(n>0){
+      const share = (Number(p.price)||0)/n;
+      marked.forEach(nm=> totals[nm]+=share);
+    }
+  }
+  return totals;
+}
+
+/******************** Eventos ********************/
+const grid = document.getElementById('grid');
+
+grid.addEventListener('input', (e)=>{
+  const t = e.target;
+  if(t.classList.contains('personName')){
+    const idx = Number(t.dataset.col); people[idx]=t.value.trim()||`Persona ${idx+1}`;
+    // mover los checks por clave: renombrar
+    products.forEach(p=>{
+      const currentKeys = Object.keys(p.checked);
+      // reconstruir checked con nuevo nombre manteniendo estado
+      const oldName = currentKeys[idx]; // no ordenado, así que más fácil: usar people antes?
+    });
+    // Como las claves son los nombres, al cambiar un nombre necesitamos migrar
+    // Estrategia: al guardar, si el antiguo nombre existía, copiar su valor al nuevo y borrar el antiguo.
+    // Para ello, necesitamos saber el antiguo nombre -> lo guardamos antes de sobrescribir.
+  }
+});
+
+// Para soportar renombrado correctamente, interceptamos antes el cambio
+let oldPeople = [...people];
+
+document.addEventListener('focusin',(e)=>{
+  const t=e.target; if(t.classList.contains('personName')){ oldPeople=[...people]; }
+});
+
+grid.addEventListener('change',(e)=>{
+  const t=e.target;
+  if(t.classList.contains('chk')){
+    const r = Number(t.dataset.row); const c = Number(t.dataset.person);
+    const nm = people[c];
+    products[r].checked[nm] = t.checked;
+    render();
+  }
+});
+
+grid.addEventListener('input',(e)=>{
+  const t=e.target;
+  if(t.classList.contains('prodName')){
+    products[Number(t.dataset.row)].name = t.value;
+    renderBody(); renderFoot();
+  } else if(t.classList.contains('prodPrice')){
+    products[Number(t.dataset.row)].price = parseFloat(t.value||0);
+    renderBody(); renderFoot();
+  } else if(t.classList.contains('personName')){
+    const idx = Number(t.dataset.col);
+    const prevName = oldPeople[idx];
+    const newName = t.value.trim()||`Persona ${idx+1}`;
+    // migrar checks
+    products.forEach(p=>{
+      if(p.checked[prevName]){ p.checked[newName]=p.checked[prevName]; delete p.checked[prevName]; }
+    });
+    people[idx]=newName; oldPeople=[...people];
+    render();
+  }
+});
+
+// Borrar persona (columna)
+grid.addEventListener('click',(e)=>{
+  const btn = e.target.closest('[data-col-del]');
+  if(btn){
+    const idx = Number(btn.dataset.colDel);
+    const name = people[idx];
+    if(!confirm(`¿Quitar a "${name}" de la hoja?`)) return;
+    people.splice(idx,1);
+    products.forEach(p=> delete p.checked[name]);
+    render();
+  }
+});
+
+// Controles superiores
+document.getElementById('addPerson').addEventListener('click',()=>{
+  const nm = prompt('Nombre de la persona:','Nueva persona');
+  if(nm===null) return; // cancel
+  const name = nm.trim()||`Persona ${people.length+1}`;
+  people.push(name);
+  // Inicialmente sin checks; la UI añadirá casillas
+  render();
+});
+
+document.getElementById('addProduct').addEventListener('click',()=>{
+  const name = prompt('Nombre del producto:','Producto');
+  if(name===null) return;
+  const priceStr = prompt('Precio (€):','0');
+  if(priceStr===null) return;
+  const price = parseFloat(priceStr.replace(',','.'))||0;
+  products.push({id:id(), name: name.trim()||'Producto', price, checked:{} });
+  render();
+});
+
+document.getElementById('reset').addEventListener('click',()=>{
+  if(!confirm('¿Seguro que quieres vaciar todo?')) return;
+  people = [];
+  products = [];
+  render();
+});
+
+/******************** Helpers ********************/
+function escapeHtml(str){
+  return (str+"").replace(/[&<>"']/g, s=>({"&":"&amp;","<":"&lt;",
+                                   ">":"&gt;","\"":"&quot;","'":"&#039;"}[s]));
+}
+
+// Inicial
+render();
+</script>
+</body>
+</html>
