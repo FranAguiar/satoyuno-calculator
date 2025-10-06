@@ -29,9 +29,31 @@
     th:first-child{background:linear-gradient(180deg,#16202d,#0f1722)}
     input[type="text"], input[type="number"]{width:100%;background:#0b111a;border:1px solid #233146;color:#e6eef8;border-radius:10px;padding:6px 8px}
     input[type="number"]{text-align:right}
-    .nameHead{display:flex;align-items:center;gap:8px}
-    .delCol, .delRow{background:transparent;border:none;color:#99a8bb;cursor:pointer}
-    .delCol:hover,.delRow:hover{color:#ffd7d7}
+
+    /* Encabezados de persona: papelera a la izquierda, nombre a la derecha */
+    .nameHead{position:relative;display:flex;align-items:center;justify-content:flex-end;gap:8px}
+    .personName{ text-align:right; padding-left:26px; }
+    .delCol{
+      position:absolute; left:4px; top:50%; transform:translateY(-50%);
+      background:transparent; border:none; color:#99a8bb; cursor:pointer;
+      font-size:16px; opacity:0; transition:opacity .2s;
+    }
+    .nameHead:hover .delCol,
+    .personName:focus ~ .delCol,
+    .delCol:hover{ opacity:1; color:#ffd7d7; }
+
+    /* Celda de producto: papelera a la derecha */
+    .prodCell{ position:relative; }
+    .prodName{ padding-right:26px; } /* espacio para la papelera */
+    .delRow{
+      position:absolute; right:4px; top:50%; transform:translateY(-50%);
+      background:transparent; border:none; color:#99a8bb; cursor:pointer;
+      font-size:16px; opacity:0; transition:opacity .2s;
+    }
+    .prodCell:hover .delRow,
+    .prodName:focus ~ .delRow,
+    .delRow:hover{ opacity:1; color:#ffd7d7; }
+
     .cellBox{display:flex;align-items:center;gap:8px}
     .share{opacity:.8;font-size:.85em}
     .stickyFoot{position:sticky;bottom:0;}
@@ -40,6 +62,16 @@
     .right{text-align:right}
     .center{text-align:center}
     .badge{font-size:.78em;background:#0b111a;border:1px solid #213043;border-radius:999px;padding:3px 8px;color:#b8c6d9}
+    tfoot td.personTotal{padding-left:26px;} /* alinear con input de persona */
+
+    /* Aviso de copiado */
+    .toast{
+      position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+      background:#0b111a; color:#e6eef8; border:1px solid #233146; padding:8px 12px;
+      border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.35); opacity:0; pointer-events:none;
+      transition:opacity .2s, transform .2s;
+    }
+    .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px); }
   </style>
 </head>
 <body>
@@ -48,6 +80,7 @@
     <div class="controls">
       <button class="accent" id="addPerson">+ Añadir persona</button>
       <button class="accent" id="addProduct">+ Añadir producto</button>
+      <button id="share">🔗 Compartir</button>
       <button id="reset">↺ Vaciar todo</button>
     </div>
   </header>
@@ -63,13 +96,12 @@
     <p class="hint">Marca las casillas de quienes comparten cada producto. El coste se reparte a partes iguales entre las personas marcadas. Puedes editar nombres y precios directamente.</p>
   </main>
 
+  <div id="toast" class="toast">¡Link copiado!</div>
+
 <script>
 /******************** Estado ********************/
 let people = []; // editable
-let products = [
-];
-// ejemplo: marcar algunos por defecto
-products.forEach(p=>{ people.forEach((nm,i)=>{ if([0,1,2,3,4].includes(i)) p.checked[nm]= true; });});
+let products = []; // {id, name, price, checked:{[personName]:boolean}}
 
 /******************** Utiles ********************/
 function id(){ return Math.random().toString(36).slice(2,9) }
@@ -88,7 +120,14 @@ function renderHead(){
     `<th class="right" style="min-width:120px">Precio (€)</th>`
   ];
   people.forEach((nm,idx)=>{
-    ths.push(`<th class="center"><div class="nameHead"><input data-col="${idx}" class="personName" type="text" value="${escapeHtml(nm)}"/> <button class="delCol" title="Quitar persona" data-col-del="${idx}">✕</button></div></th>`)
+    ths.push(
+      `<th class="center">
+        <div class="nameHead">
+          <input data-col="${idx}" class="personName" type="text" value="${escapeHtml(nm)}"/>
+          <button class="delCol" title="Eliminar persona" data-col-del="${idx}">🗑️</button>
+        </div>
+      </th>`
+    )
   });
   document.getElementById('thead').innerHTML = `<tr>${ths.join('')}</tr>`;
 }
@@ -96,18 +135,29 @@ function renderHead(){
 function renderBody(){
   const rows = products.map((p,ri)=>{
     const cells = [
-      `<td><div class="cellBox"><input class="prodName" data-row="${ri}" type="text" value="${escapeHtml(p.name)}"/></div></td>`,
-      `<td class="right"><input class="prodPrice" data-row="${ri}" type="number" min="0" step="0.01" value="${p.price}"></td>`
+      `<td class="prodCell">
+         <input class="prodName" data-row="${ri}" type="text" value="${escapeHtml(p.name ?? '')}"/>
+         <button class="delRow" title="Eliminar producto" data-row-del="${ri}">🗑️</button>
+       </td>`,
+      `<td class="right"><input class="prodPrice" data-row="${ri}" type="number" min="0" step="0.01" value="${p.price ?? 0}"></td>`
     ];
 
-    const activeCount = (prod=> people.reduce((acc,nm)=> acc + (prod.checked[nm]?1:0),0))(p);
+    const activeCount = people.reduce((acc,nm)=> acc + (p.checked?.[nm]?1:0),0);
 
     people.forEach((nm,ci)=>{
-      const on = !!p.checked[nm];
-      const share = on && activeCount>0 ? p.price/activeCount : 0;
-      cells.push(`<td class="center"><label style="display:flex;align-items:center;gap:8px;justify-content:center"><input class="chk" type="checkbox" data-row="${ri}" data-person="${ci}" ${on?"checked":""}/> <span class="share">${on?format(share):""}</span></label></td>`)
+      const on = !!(p.checked && p.checked[nm]);
+      const share = on && activeCount>0 ? (+p.price||0)/activeCount : 0;
+      cells.push(
+        `<td class="center">
+          <label style="display:flex;align-items:center;gap:8px;justify-content:center">
+            <input class="chk" type="checkbox" data-row="${ri}" data-person="${ci}" ${on?"checked":""}/>
+            <span class="share">${on?format(share):""}</span>
+          </label>
+        </td>`
+      )
     });
 
+    /* Conservamos el <td hidden> tal como en tu versión previa */
     return `<tr>${cells.join('')}<td hidden></td></tr>`;
   });
   document.getElementById('tbody').innerHTML = rows.join('');
@@ -120,7 +170,7 @@ function renderFoot(){
     `<td class="right">${format(products.reduce((a,p)=>a+Number(p.price||0),0))}</td>`
   ];
   people.forEach(nm=>{
-    tds.push(`<td class="right">${format(totals[nm]||0)}</td>`)
+    tds.push(`<td class="right personTotal">${format(totals[nm]||0)}</td>`)
   });
   document.getElementById('tfoot').innerHTML = `<tr class="stickyFoot">${tds.join('')}</tr>`;
 }
@@ -129,7 +179,7 @@ function renderFoot(){
 function calcTotals(){
   const totals = Object.fromEntries(people.map(nm=>[nm,0]));
   for(const p of products){
-    const marked = people.filter(nm=>p.checked[nm]);
+    const marked = people.filter(nm=>p.checked && p.checked[nm]);
     const n = marked.length;
     if(n>0){
       const share = (Number(p.price)||0)/n;
@@ -139,26 +189,60 @@ function calcTotals(){
   return totals;
 }
 
+/******************** Compartir por URL ********************/
+function encodeState() {
+  const state = { people, products };
+  const json = JSON.stringify(state);
+  return btoa(encodeURIComponent(json)); // base64 seguro
+}
+function decodeState(encoded) {
+  try {
+    const json = decodeURIComponent(atob(encoded));
+    const state = JSON.parse(json);
+    if (Array.isArray(state.people) && Array.isArray(state.products)) {
+      people = state.people;
+      products = state.products;
+    }
+  } catch (e) {
+    console.error("Error al cargar datos desde la URL:", e);
+  }
+}
+function updateShareLink() {
+  const hash = encodeState();
+  const newUrl = `${location.origin}${location.pathname}#data=${hash}`;
+  history.replaceState(null, "", newUrl);
+}
+function loadFromUrl() {
+  const m = location.hash.match(/data=([^&]+)/);
+  if (m) decodeState(m[1]);
+}
+async function copyShareLink() {
+  try {
+    await navigator.clipboard.writeText(location.href);
+    showToast("¡Link copiado!");
+  } catch {
+    const tmp = document.createElement("input");
+    tmp.value = location.href;
+    document.body.appendChild(tmp);
+    tmp.select(); document.execCommand("copy");
+    tmp.remove();
+    showToast("¡Link copiado!");
+  }
+}
+function showToast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=> el.classList.remove('show'), 1500);
+}
+
+/* Hook: tras cada render, actualizamos el hash compartible */
+const _render = render;
+render = function(){ _render(); updateShareLink(); };
+
 /******************** Eventos ********************/
 const grid = document.getElementById('grid');
-
-grid.addEventListener('input', (e)=>{
-  const t = e.target;
-  if(t.classList.contains('personName')){
-    const idx = Number(t.dataset.col); people[idx]=t.value.trim()||`Persona ${idx+1}`;
-    // mover los checks por clave: renombrar
-    products.forEach(p=>{
-      const currentKeys = Object.keys(p.checked);
-      // reconstruir checked con nuevo nombre manteniendo estado
-      const oldName = currentKeys[idx]; // no ordenado, así que más fácil: usar people antes?
-    });
-    // Como las claves son los nombres, al cambiar un nombre necesitamos migrar
-    // Estrategia: al guardar, si el antiguo nombre existía, copiar su valor al nuevo y borrar el antiguo.
-    // Para ello, necesitamos saber el antiguo nombre -> lo guardamos antes de sobrescribir.
-  }
-});
-
-// Para soportar renombrado correctamente, interceptamos antes el cambio
 let oldPeople = [...people];
 
 document.addEventListener('focusin',(e)=>{
@@ -170,6 +254,7 @@ grid.addEventListener('change',(e)=>{
   if(t.classList.contains('chk')){
     const r = Number(t.dataset.row); const c = Number(t.dataset.person);
     const nm = people[c];
+    products[r].checked = products[r].checked || {};
     products[r].checked[nm] = t.checked;
     render();
   }
@@ -179,32 +264,46 @@ grid.addEventListener('input',(e)=>{
   const t=e.target;
   if(t.classList.contains('prodName')){
     products[Number(t.dataset.row)].name = t.value;
-    renderBody(); renderFoot();
+    renderBody(); renderFoot(); updateShareLink();
   } else if(t.classList.contains('prodPrice')){
     products[Number(t.dataset.row)].price = parseFloat(t.value||0);
-    renderBody(); renderFoot();
+    renderBody(); renderFoot(); updateShareLink();
   } else if(t.classList.contains('personName')){
     const idx = Number(t.dataset.col);
     const prevName = oldPeople[idx];
     const newName = t.value.trim()||`Persona ${idx+1}`;
-    // migrar checks
     products.forEach(p=>{
-      if(p.checked[prevName]){ p.checked[newName]=p.checked[prevName]; delete p.checked[prevName]; }
+      p.checked = p.checked || {};
+      if(Object.prototype.hasOwnProperty.call(p.checked, prevName)){
+        p.checked[newName]=p.checked[prevName];
+        delete p.checked[prevName];
+      }
     });
     people[idx]=newName; oldPeople=[...people];
-    render();
+    render(); // updateShareLink se llama dentro
   }
 });
 
 // Borrar persona (columna)
 grid.addEventListener('click',(e)=>{
-  const btn = e.target.closest('[data-col-del]');
-  if(btn){
-    const idx = Number(btn.dataset.colDel);
+  const btnCol = e.target.closest('[data-col-del]');
+  if(btnCol){
+    const idx = Number(btnCol.dataset.colDel);
     const name = people[idx];
     if(!confirm(`¿Quitar a "${name}" de la hoja?`)) return;
     people.splice(idx,1);
-    products.forEach(p=> delete p.checked[name]);
+    products.forEach(p=> { if(p.checked) delete p.checked[name]; });
+    render();
+    return;
+  }
+
+  // Borrar producto (fila)
+  const btnRow = e.target.closest('[data-row-del]');
+  if(btnRow){
+    const ri = Number(btnRow.dataset.rowDel);
+    const prodName = products[ri]?.name || 'producto';
+    if(!confirm(`¿Eliminar "${prodName}"?`)) return;
+    products.splice(ri,1);
     render();
   }
 });
@@ -215,7 +314,6 @@ document.getElementById('addPerson').addEventListener('click',()=>{
   if(nm===null) return; // cancel
   const name = nm.trim()||`Persona ${people.length+1}`;
   people.push(name);
-  // Inicialmente sin checks; la UI añadirá casillas
   render();
 });
 
@@ -224,7 +322,7 @@ document.getElementById('addProduct').addEventListener('click',()=>{
   if(name===null) return;
   const priceStr = prompt('Precio (€):','0');
   if(priceStr===null) return;
-  const price = parseFloat(priceStr.replace(',','.'))||0;
+  const price = parseFloat((priceStr+'').replace(',','.'))||0;
   products.push({id:id(), name: name.trim()||'Producto', price, checked:{} });
   render();
 });
@@ -236,13 +334,15 @@ document.getElementById('reset').addEventListener('click',()=>{
   render();
 });
 
+document.getElementById('share').addEventListener('click', copyShareLink);
+
 /******************** Helpers ********************/
 function escapeHtml(str){
-  return (str+"").replace(/[&<>"']/g, s=>({"&":"&amp;","<":"&lt;",
-                                   ">":"&gt;","\"":"&quot;","'":"&#039;"}[s]));
+  return (str+"").replace(/[&<>"']/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[s]));
 }
 
-// Inicial
+/* Inicial: cargar desde URL si existe, y luego render (que actualizará el hash) */
+loadFromUrl();
 render();
 </script>
 </body>
