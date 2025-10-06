@@ -44,7 +44,7 @@
 
     /* Celda de producto: papelera a la derecha */
     .prodCell{ position:relative; }
-    .prodName{ padding-right:26px; } /* espacio para la papelera */
+    .prodName{ padding-right:26px; }
     .delRow{
       position:absolute; right:4px; top:50%; transform:translateY(-50%);
       background:transparent; border:none; color:#99a8bb; cursor:pointer;
@@ -76,7 +76,7 @@
 </head>
 <body>
   <header>
-    <div class="title">🐷 Satoyuno calculator </div>
+    <div class="title">🐷 Satoyuno calculator <span class="badge">checkbox por persona/producto</span></div>
     <div class="controls">
       <button class="accent" id="addPerson">+ Añadir persona</button>
       <button class="accent" id="addProduct">+ Añadir producto</button>
@@ -189,6 +189,22 @@ function calcTotals(){
   return totals;
 }
 
+/******************** Actualizaciones parciales (sin re-render) ********************/
+function updateRowShares(rowIndex){
+  const p = products[rowIndex];
+  const activeCount = people.reduce((acc,nm)=> acc + (p.checked?.[nm]?1:0),0);
+  const share = activeCount>0 ? ((+p.price||0)/activeCount) : 0;
+  const boxes = document.querySelectorAll(`input.chk[data-row="${rowIndex}"]`);
+  boxes.forEach(box=>{
+    const span = box.parentElement.querySelector('.share');
+    span.textContent = box.checked && activeCount>0 ? format(share) : '';
+  });
+}
+function updateFootTotals(){
+  // Recalcula y sustituye solo el tfoot
+  renderFoot();
+}
+
 /******************** Compartir por URL ********************/
 function encodeState() {
   const state = { people, products };
@@ -237,7 +253,7 @@ function showToast(msg){
   showToast._t = setTimeout(()=> el.classList.remove('show'), 1500);
 }
 
-/* Hook: tras cada render, actualizamos el hash compartible */
+/* Hook: tras cada render completo, actualizamos el hash compartible */
 const _render = render;
 render = function(){ _render(); updateShareLink(); };
 
@@ -251,24 +267,23 @@ document.addEventListener('focusin',(e)=>{
 
 grid.addEventListener('change',(e)=>{
   const t=e.target;
+
   if(t.classList.contains('chk')){
     const r = Number(t.dataset.row); const c = Number(t.dataset.person);
     const nm = people[c];
     products[r].checked = products[r].checked || {};
     products[r].checked[nm] = t.checked;
-    render();
+    render(); // recalcula todo (totales, shares, etc.)
+    return;
   }
-});
 
-grid.addEventListener('input',(e)=>{
-  const t=e.target;
-  if(t.classList.contains('prodName')){
-    products[Number(t.dataset.row)].name = t.value;
-    renderBody(); renderFoot(); updateShareLink();
-  } else if(t.classList.contains('prodPrice')){
-    products[Number(t.dataset.row)].price = parseFloat(t.value||0);
-    renderBody(); renderFoot(); updateShareLink();
-  } else if(t.classList.contains('personName')){
+  // Al terminar de editar (change) sí hacemos render completo
+  if(t.classList.contains('prodName') || t.classList.contains('prodPrice')){
+    render();
+    return;
+  }
+
+  if(t.classList.contains('personName')){
     const idx = Number(t.dataset.col);
     const prevName = oldPeople[idx];
     const newName = t.value.trim()||`Persona ${idx+1}`;
@@ -280,11 +295,30 @@ grid.addEventListener('input',(e)=>{
       }
     });
     people[idx]=newName; oldPeople=[...people];
-    render(); // updateShareLink se llama dentro
+    render();
   }
 });
 
-// Borrar persona (columna)
+// Mientras escribes, NO re-renderizamos: solo actualizamos estado y partes necesarias
+grid.addEventListener('input',(e)=>{
+  const t=e.target;
+
+  if(t.classList.contains('prodName')){
+    products[Number(t.dataset.row)].name = t.value;
+    updateShareLink(); // actualiza URL pero no rompe el foco
+  } else if(t.classList.contains('prodPrice')){
+    const ri = Number(t.dataset.row);
+    products[ri].price = parseFloat(t.value||0);
+    updateRowShares(ri); // actualiza shares de esa fila
+    updateFootTotals();  // actualiza totales sin tocar inputs
+    updateShareLink();
+  } else if(t.classList.contains('personName')){
+    // No migramos aún; solo actualizamos la URL si quieres compartir mientras escribes
+    updateShareLink();
+  }
+});
+
+// Clicks: borrar persona / borrar producto
 grid.addEventListener('click',(e)=>{
   const btnCol = e.target.closest('[data-col-del]');
   if(btnCol){
@@ -297,7 +331,6 @@ grid.addEventListener('click',(e)=>{
     return;
   }
 
-  // Borrar producto (fila)
   const btnRow = e.target.closest('[data-row-del]');
   if(btnRow){
     const ri = Number(btnRow.dataset.rowDel);
@@ -338,7 +371,8 @@ document.getElementById('share').addEventListener('click', copyShareLink);
 
 /******************** Helpers ********************/
 function escapeHtml(str){
-  return (str+"").replace(/[&<>"']/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[s]));
+  return (str+"").replace(/[&<>"']/g, s=>({"&":"&amp;","<":"&lt;",
+                                   ">":"&gt;","\"":"&quot;","'":"&#039;"}[s]));
 }
 
 /* Inicial: cargar desde URL si existe, y luego render (que actualizará el hash) */
