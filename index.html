@@ -176,14 +176,39 @@ function renderFoot(){
 }
 
 /******************** Logica ********************/
+function isJohann(name){
+  const lowerName = name.toLowerCase();
+  return lowerName === 'johann' || lowerName === 'johan';
+}
+
 function calcTotals(){
   const totals = Object.fromEntries(people.map(nm=>[nm,0]));
   for(const p of products){
     const marked = people.filter(nm=>p.checked && p.checked[nm]);
     const n = marked.length;
     if(n>0){
-      const share = (Number(p.price)||0)/n;
-      marked.forEach(nm=> totals[nm]+=share);
+      const productPrice = Number(p.price)||0;
+      const johannIndex = marked.findIndex(nm => isJohann(nm));
+      
+      if(johannIndex !== -1 && marked.length > 1){
+        const normalShare = productPrice / n;
+        const johannReduction = normalShare * 0.5;
+        const redistributeAmount = normalShare - johannReduction;
+        const otherParticipants = marked.filter(nm => !isJohann(nm));
+        const redistributePerPerson = redistributeAmount / otherParticipants.length;
+        
+        // Asignar cuotas
+        marked.forEach(nm => {
+          if(isJohann(nm)){
+            totals[nm] += johannReduction;
+          } else {
+            totals[nm] += normalShare + redistributePerPerson;
+          }
+        });
+      } else {
+        const share = productPrice / n;
+        marked.forEach(nm=> totals[nm] += share);
+      }
     }
   }
   return totals;
@@ -192,12 +217,36 @@ function calcTotals(){
 /******************** Actualizaciones parciales (sin re-render) ********************/
 function updateRowShares(rowIndex){
   const p = products[rowIndex];
-  const activeCount = people.reduce((acc,nm)=> acc + (p.checked?.[nm]?1:0),0);
-  const share = activeCount>0 ? ((+p.price||0)/activeCount) : 0;
+  const marked = people.filter(nm => p.checked?.[nm]);
+  const activeCount = marked.length;
+  const productPrice = (+p.price||0);
+  
   const boxes = document.querySelectorAll(`input.chk[data-row="${rowIndex}"]`);
-  boxes.forEach(box=>{
+  boxes.forEach((box, idx) => {
     const span = box.parentElement.querySelector('.share');
-    span.textContent = box.checked && activeCount>0 ? format(share) : '';
+    if(!box.checked || activeCount === 0){
+      span.textContent = '';
+      return;
+    }
+    
+    const personName = people[Number(box.dataset.person)];
+    let shareAmount = productPrice / activeCount; // Cuota normal
+    
+    // Aplicar lógica especial si Johann/Johan está presente y hay más participantes
+    const johannIndex = marked.findIndex(nm => isJohann(nm));
+    if(johannIndex !== -1 && activeCount > 1){
+      if(isJohann(personName)){
+        shareAmount = shareAmount * 0.5; // Johann/Johan paga solo el 50%
+      } else {
+        const normalShare = productPrice / activeCount;
+        const johannReduction = normalShare * 0.5;
+        const redistributeAmount = normalShare - johannReduction;
+        const otherParticipants = marked.filter(nm => !isJohann(nm)).length;
+        shareAmount = normalShare + (redistributeAmount / otherParticipants);
+      }
+    }
+    
+    span.textContent = format(shareAmount);
   });
 }
 function updateFootTotals(){
